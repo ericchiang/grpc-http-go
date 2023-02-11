@@ -75,10 +75,10 @@ $ curl -s http://localhost:8080/v1/items/myitem | jq .
 ```
 
 This project is compariable to gRPC to HTTP/JSON support that exists
-[gRPC-Gateway][grpc-gateway] and [Envoy][envoy], which are likely better
-solutions for larger scale deployments of gRPC services. The grpchttp package
-aims to be a good solution for single binaries written in Go to quickly support
-HTTP bindings without custom proto generators.
+[gRPC-Gateway][grpc-gateway] and [Envoy][envoy], which are aim at larger scale
+deployments of gRPC services. The grpchttp package aims to be a good solution
+for single binaries written in Go to quickly support HTTP bindings without
+custom proto generators.
 
 [envoy]: https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/grpc_json_transcoder_filter
 [grpc-gateway]: https://github.com/grpc-ecosystem/grpc-gateway
