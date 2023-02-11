@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package ericchiang.protorest.internal.testservice;
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+
+service Test {
+  rpc GetItem(GetItemRequest) returns(Item) {
+    option (google.api.http) = { get: "/v1/items/{name=*}" };
+  } 
+
+  rpc CreateItem(CreateItemRequest) returns(Item) {
+    option (google.api.http) = { 
+      post: "/v1/items"
+      body: "item"
+    };
+  }
+
+  rpc ListItems(google.protobuf.Empty) returns(ListItemsResponse) {
+    option (google.api.http) = { get: "/v1/items" };
+  } 
+}
+
+message Item {
+  string name = 1;
+  int64 id = 2;
+  ItemKind kind = 3;
+}
+
+enum ItemKind {
+  ITEM_KIND_UNSPECIFIED = 0;
+  WIDGET = 1;
+  GADGET = 2;
+};
+
+message Filter {
+  int64 id = 1;
+  ItemKind kind = 2;
+}
+
+message GetItemRequest {
+  string name = 1;
+  Filter filter = 2;
+}
+
+message CreateItemRequest {
+  Item item = 1;
+}
+
+message ListItemsResponse {
+  repeated Item items = 1;
+}
