@@ -28,12 +28,38 @@ service Test {
     option (google.api.http) = { 
       post: "/v1/items"
       body: "item"
+      additional_bindings: {
+        post: "/test_body_star"
+        body: "*"
+      }
+      additional_bindings: {
+        put: "/test_put"
+        body: "item"
+      }
+      additional_bindings: {
+        patch: "/test_patch"
+        body: "item"
+      }
+      additional_bindings: {
+        custom: {
+          kind: "CUSTOMMETHOD"
+          path: "/test_custom"
+        }
+        body: "item"
+      }
     };
   }
 
   rpc ListItems(google.protobuf.Empty) returns(ListItemsResponse) {
     option (google.api.http) = { get: "/v1/items" };
   } 
+
+  rpc TestResponseBody(google.protobuf.Empty) returns(TestResponseBodyResponse) {
+    option (google.api.http) = {
+      get: "/test_response_body"
+      response_body: "response"
+    };
+  }
 }
 
 message Item {
@@ -64,4 +90,11 @@ message CreateItemRequest {
 
 message ListItemsResponse {
   repeated Item items = 1;
+}
+
+message TestResponseBodyResponse {
+  message Response {
+    string name = 1;
+  }
+  Response response = 1;
 }

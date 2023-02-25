@@ -26,6 +26,7 @@ type TestClient interface {
 	GetItem(ctx context.Context, in *GetItemRequest, opts ...grpc.CallOption) (*Item, error)
 	CreateItem(ctx context.Context, in *CreateItemRequest, opts ...grpc.CallOption) (*Item, error)
 	ListItems(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListItemsResponse, error)
+	TestResponseBody(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*TestResponseBodyResponse, error)
 }
 
 type testClient struct {
@@ -63,6 +64,15 @@ func (c *testClient) ListItems(ctx context.Context, in *emptypb.Empty, opts ...g
 	return out, nil
 }
 
+func (c *testClient) TestResponseBody(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*TestResponseBodyResponse, error) {
+	out := new(TestResponseBodyResponse)
+	err := c.cc.Invoke(ctx, "/ericchiang.protorest.internal.testservice.Test/TestResponseBody", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TestServer is the server API for Test service.
 // All implementations must embed UnimplementedTestServer
 // for forward compatibility
@@ -70,6 +80,7 @@ type TestServer interface {
 	GetItem(context.Context, *GetItemRequest) (*Item, error)
 	CreateItem(context.Context, *CreateItemRequest) (*Item, error)
 	ListItems(context.Context, *emptypb.Empty) (*ListItemsResponse, error)
+	TestResponseBody(context.Context, *emptypb.Empty) (*TestResponseBodyResponse, error)
 	mustEmbedUnimplementedTestServer()
 }
 
@@ -85,6 +96,9 @@ func (UnimplementedTestServer) CreateItem(context.Context, *CreateItemRequest) (
 }
 func (UnimplementedTestServer) ListItems(context.Context, *emptypb.Empty) (*ListItemsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListItems not implemented")
+}
+func (UnimplementedTestServer) TestResponseBody(context.Context, *emptypb.Empty) (*TestResponseBodyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TestResponseBody not implemented")
 }
 func (UnimplementedTestServer) mustEmbedUnimplementedTestServer() {}
 
@@ -153,6 +167,24 @@ func _Test_ListItems_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Test_TestResponseBody_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TestServer).TestResponseBody(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/ericchiang.protorest.internal.testservice.Test/TestResponseBody",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TestServer).TestResponseBody(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Test_ServiceDesc is the grpc.ServiceDesc for Test service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -171,6 +203,10 @@ var Test_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListItems",
 			Handler:    _Test_ListItems_Handler,
+		},
+		{
+			MethodName: "TestResponseBody",
+			Handler:    _Test_TestResponseBody_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
