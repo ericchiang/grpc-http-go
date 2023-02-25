@@ -39,7 +39,7 @@ package main
 
 import (
     "context"
-	"log"
+    "log"
     "net/http"
 
     "github.com/ericchiang/grpc-http-go/grpchttp"
