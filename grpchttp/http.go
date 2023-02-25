@@ -258,7 +258,7 @@ func newMethod(srv reflect.Value, desc protoreflect.MethodDescriptor) (*method, 
 
 // rule is a parsed HttpRule annotation and associated method.
 type rule struct {
-	path     *pathComponent
+	path     *pathTemplate
 	method   *method
 	body     string
 	response string
@@ -458,37 +458,56 @@ func writeResponse(w http.ResponseWriter, statusCode int, resp proto.Message) {
 	w.Write(data)
 }
 
-type pathComponent struct {
+// pathTemplate is the parsed representation of a path template. Templates are
+// implemented as a linked list, with each node corresponding to a single path
+// element. The template '/foo/{x=bar/*}:spam' would be represented as the
+// following nodes:
+//
+//   'foo' -> 'bar' -> '*'
+//
+// The final node holds variables and verbs of the template. For the example
+// above, the variables would be:
+//
+//   pathVariable{name: "x", start: 1, end: 2}
+//
+// The verb would be ':spam'.
+type pathTemplate struct {
 	s string // Original string.
 
-	wildcard       bool
-	doubleWildcard bool
-	ident          string
+	// Exactly one of these will be set.
+	wildcard       bool   // '*'
+	doubleWildcard bool   // '**'
+	ident          string // 'foo'
 
 	// If this isn't the last path component, next will be not nil.
-	next *pathComponent
+	next *pathTemplate
 
 	// If next is nil, and this if the final element, the following
 	// values will be set.
 
-	verb      string
+	// Verb of the path template without the ':'. For the template '/foo:bar', this
+	// would hold 'bar'.
+	verb string
+	// Any varabiles and their associated indexes within the path.
 	variables []pathVariable
 }
 
-func (p *pathComponent) leaf() *pathComponent {
+// leaf returns the last path template.
+func (p *pathTemplate) leaf() *pathTemplate {
 	for p.next != nil {
 		p = p.next
 	}
 	return p
 }
 
-func (p *pathComponent) sameVerb(p2 *pathComponent) bool {
+// sameVerb determines if the two path templates have the same verb.
+func (p *pathTemplate) sameVerb(p2 *pathTemplate) bool {
 	return p.leaf().verb == p2.leaf().verb
 }
 
 // overlaps attempts to determine if two path templates could match the same
 // path (/foo/bar, foo/*).
-func (p *pathComponent) overlaps(p2 *pathComponent) bool {
+func (p *pathTemplate) overlaps(p2 *pathTemplate) bool {
 	if p.doubleWildcard || p2.doubleWildcard {
 		return p.sameVerb(p2)
 	}
@@ -504,26 +523,30 @@ func (p *pathComponent) overlaps(p2 *pathComponent) bool {
 	return false
 }
 
+// varValue holds a resolved value from a path template. If '/foo/{name}'
+// matches '/foo/bar'. The varValue {name: "name", val: "bar"} will be returned.
 type varValue struct {
 	name string
 	val  string
 }
 
-func (p *pathComponent) matches(path string) ([]varValue, bool) {
+// matches indicates if a path template matches the URL path.
+func (p *pathTemplate) matches(path string) ([]varValue, bool) {
 	if !strings.HasPrefix(path, "/") {
 		return nil, false
 	}
 	path = path[1:]
+
+	// Perform the match on the full path, then walk the path nodes to
+	// determine variable values.
 	pc, ok := p.matchesPath(path)
 	if !ok {
 		return nil, false
 	}
 
-	// If the path has a verb, remove it.
-	i := strings.LastIndex(path, ":")
-	if i > 0 {
-		path = path[:i]
-	}
+	// Path already matches and verbs can't have varbiales. If the path has a verb,
+	// remove it.
+	path, _, _ = strings.Cut(path, ":")
 
 	var values []varValue
 	for _, v := range pc.variables {
@@ -539,7 +562,7 @@ func (p *pathComponent) matches(path string) ([]varValue, bool) {
 		}
 
 		end := start
-		if v.end == doubleWildcard {
+		if v.end == endDoubleWildcard {
 			end = len(p)
 		} else {
 			for i := v.start; i < v.end; i++ {
@@ -557,7 +580,11 @@ func (p *pathComponent) matches(path string) ([]varValue, bool) {
 	return values, true
 }
 
-func (p *pathComponent) matchesPath(path string) (*pathComponent, bool) {
+// matchesPath iterates through each component of the pathTemplate, determining
+// if the path matches the value.
+//
+// If the path matches, this method returns the leaf node.
+func (p *pathTemplate) matchesPath(path string) (*pathTemplate, bool) {
 	path, verb, foundVerb := strings.Cut(path, ":")
 	for {
 		curr, rest, found := strings.Cut(path, "/")
@@ -588,7 +615,9 @@ func (p *pathComponent) matchesPath(path string) (*pathComponent, bool) {
 	}
 }
 
-func (p *pathComponent) len() int {
+// len computes the number of components in a path template. The template
+// '/foo/{bar=x/*}' would return 3.
+func (p *pathTemplate) len() int {
 	n := 1
 	pc := p
 	for pc.next != nil {
@@ -598,30 +627,43 @@ func (p *pathComponent) len() int {
 	return n
 }
 
-func (p *pathComponent) String() string {
+// String returns the string that was used to compile the path template.
+func (p *pathTemplate) String() string {
 	return p.s
 }
 
-const doubleWildcard = -1
+// endDoubleWildcard is a special value indicating that the path variable ends
+// with a double wildcard, not a specific index.
+//
+// A path such as '/foo/{bar=**}' would use this value.
+const endDoubleWildcard = -1
 
+// pathVariable holds an individual path variable, and what component it starts
+// and ends at.
 type pathVariable struct {
 	name  string
 	start int
 	end   int
 }
 
+// eof is a special rune value used by the scanner.
 const eof = 0
 
+// scanner is a minimal rune reader.
 type scanner struct {
 	s    string
 	last int
 	n    int
 }
 
+// newScanner initializes a scanner from a given string.
+//
+// Scanners assume the input is a valid UTF-8 string.
 func newScanner(s string) *scanner {
 	return &scanner{s: s}
 }
 
+// next returns the next rune in the string, or eof.
 func (s *scanner) next() rune {
 	if s.n >= len(s.s) {
 		return eof
@@ -631,6 +673,7 @@ func (s *scanner) next() rune {
 	return r
 }
 
+// peek returns the next rune in the string without advancing the scanner.
 func (s *scanner) peek() rune {
 	if s.n >= len(s.s) {
 		return eof
@@ -639,25 +682,39 @@ func (s *scanner) peek() rune {
 	return r
 }
 
+// skip causes the scanner to discard the pending string. It does not change
+// the current index.
 func (s *scanner) skip() {
 	s.last = s.n
 }
 
+// string returns the current consumed string then skips to the last index.
 func (s *scanner) string() string {
 	last := s.last
 	s.last = s.n
 	return s.s[last:s.n]
 }
 
+// errorf returns a formatted string with additional context from the scanner.
 func (s *scanner) errorf(format string, v ...any) error {
 	return fmt.Errorf("failed parsing %s at pos %d: "+format, append([]any{s.s, s.n}, v...)...)
 }
 
+// parsePathTemplate parses a raw path template into its linked list form.
+func parsePathTemplate(path string) (*pathTemplate, error) {
+	p := &parser{newScanner(path)}
+	return p.parse(path)
+}
+
+// parser is a path template parser.
+//
+// See: https://github.com/googleapis/googleapis/blob/master/google/api/http.proto
 type parser struct {
 	s *scanner
 }
 
-func (p *parser) parse(path string) (*pathComponent, error) {
+// parse compiles a path template.
+func (p *parser) parse(path string) (*pathTemplate, error) {
 	switch p.s.next() {
 	case '/':
 	case eof:
@@ -674,11 +731,19 @@ func (p *parser) parse(path string) (*pathComponent, error) {
 	return pc, nil
 }
 
-func (p *parser) parseSegments(inVariable bool) (*pathComponent, error) {
+// parseSegments parse a top level template, including segments and optional verb.
+//
+//   Template = "/" Segments [ Verb ] ;
+//
+// This is used within variables as well, but rejects recursive variables.
+//
+//   Variable = "{" FieldPath [ "=" Segments ] "}" ;
+//
+func (p *parser) parseSegments(inVariable bool) (*pathTemplate, error) {
 	var (
 		vars       []pathVariable
 		verb       string
-		head, tail *pathComponent
+		head, tail *pathTemplate
 	)
 	for {
 		r := p.s.peek()
@@ -711,7 +776,7 @@ func (p *parser) parseSegments(inVariable bool) (*pathComponent, error) {
 			end := start + next.len()
 
 			if next.leaf().doubleWildcard {
-				end = doubleWildcard
+				end = endDoubleWildcard
 			}
 
 			pv := pathVariable{varName, start, end}
@@ -775,6 +840,8 @@ func (p *parser) parseSegments(inVariable bool) (*pathComponent, error) {
 	return head, nil
 }
 
+// isReserved returns if a rune is one of the reserved characters used in a path
+// template.
 func isReserved(r rune) bool {
 	switch r {
 	case '/', '*', '{', '=', '}', '.', ':':
@@ -784,7 +851,7 @@ func isReserved(r rune) bool {
 	}
 }
 
-func (p *parser) parseSegment(inVariable bool) (pc *pathComponent, varName string, err error) {
+func (p *parser) parseSegment(inVariable bool) (pc *pathTemplate, varName string, err error) {
 	r := p.s.peek()
 	switch r {
 	case eof:
@@ -795,9 +862,9 @@ func (p *parser) parseSegment(inVariable bool) (pc *pathComponent, varName strin
 			return nil, "", err
 		}
 		if isDouble {
-			return &pathComponent{doubleWildcard: true}, "", nil
+			return &pathTemplate{doubleWildcard: true}, "", nil
 		}
-		return &pathComponent{wildcard: true}, "", nil
+		return &pathTemplate{wildcard: true}, "", nil
 	case '{':
 		if inVariable {
 			return nil, "", p.s.errorf("variable contains '{' character")
@@ -809,7 +876,7 @@ func (p *parser) parseSegment(inVariable bool) (pc *pathComponent, varName strin
 			return nil, "", err
 		}
 		varName := p.s.string()
-		var varPath *pathComponent
+		var varPath *pathTemplate
 		r := p.s.peek()
 		switch r {
 		case '=':
@@ -827,16 +894,18 @@ func (p *parser) parseSegment(inVariable bool) (pc *pathComponent, varName strin
 			return nil, "", p.s.errorf("unexpected character parsing variable: '%c'", r)
 		}
 		if varPath == nil {
-			varPath = &pathComponent{wildcard: true}
+			varPath = &pathTemplate{wildcard: true}
 		}
 		return varPath, varName, nil
 	}
 	if err := p.parseIdent(); err != nil {
 		return nil, "", err
 	}
-	return &pathComponent{ident: p.s.string()}, "", nil
+	return &pathTemplate{ident: p.s.string()}, "", nil
 }
 
+// parseFieldPath consumes a field path. For the path '/foo/{f1.f2=*}', this
+// would be used to consumed 'f1.f2'.
 func (p *parser) parseFieldPath() error {
 	for {
 		if err := p.parseIdent(); err != nil {
@@ -849,6 +918,7 @@ func (p *parser) parseFieldPath() error {
 	}
 }
 
+// parseIdent consumes an identifier up to the next reserved character, or eof.
 func (p *parser) parseIdent() error {
 	r := p.s.next()
 	if r == eof {
@@ -871,6 +941,7 @@ func (p *parser) parseIdent() error {
 	}
 }
 
+// parseWildcard consumes a wildcard (or double wildcard).
 func (p *parser) parseWildcard() (double bool, err error) {
 	p.s.next()
 	switch p.s.peek() {
@@ -884,9 +955,4 @@ func (p *parser) parseWildcard() (double bool, err error) {
 	default:
 		return false, p.s.errorf("expected '/', ':', '*', '}' or eof after '*'")
 	}
-}
-
-func parsePathTemplate(path string) (*pathComponent, error) {
-	p := &parser{newScanner(path)}
-	return p.parse(path)
 }
