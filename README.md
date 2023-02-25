@@ -57,7 +57,7 @@ func (s *service) GetItem(ctx context.Context, req *pb.GetItemRequest) (*pb.Item
 
 func main() {
     srv := &service{}
-    hander, err := grpchttp.NewHandler(srv, &pb.Test_ServiceDesc)
+    hander, err := grpchttp.NewHandler(&pb.Test_ServiceDesc, srv)
     if err != nil {
         log.Fatalf("creating HTTP handler: %v", err)
     }
