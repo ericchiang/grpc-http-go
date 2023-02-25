@@ -1,5 +1,7 @@
 # gRPC HTTP annotations for Go
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/ericchiang/grpc-http-go/grpchttp.svg)](https://pkg.go.dev/github.com/ericchiang/grpc-http-go/grpchttp)
+
 A Go implementation of [gRPC to HTTP/JSON transcoding][grpc-to-http] using
 Google's [HTTP Protobuf annotations][grpc-http-annotations].
 
