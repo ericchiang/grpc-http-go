@@ -17,6 +17,7 @@ package grpchttp
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -27,9 +28,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/testing/protocmp"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	pb "github.com/ericchiang/grpc-http-go/grpchttp/internal/testservice"
+	errdetailspb "google.golang.org/genproto/googleapis/rpc/errdetails"
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
 )
 
 type testServer struct {
@@ -204,6 +208,112 @@ func TestResponseBody(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
 		t.Fatalf("/test_response_body returned unexpected diff (-want, +got): %s", diff)
+	}
+}
+
+type customErrServer struct {
+	pb.UnimplementedTestServer
+}
+
+func (s *customErrServer) GetItem(ctx context.Context, req *pb.GetItemRequest) (*pb.Item, error) {
+	info := &errdetailspb.ErrorInfo{
+		Reason: "foo",
+		Domain: "example.com",
+		Metadata: map[string]string{
+			"bar": "spam",
+		},
+	}
+	any, err := anypb.New(info)
+	if err != nil {
+		return nil, fmt.Errorf("encoding any value: %v", err)
+	}
+	stat := &statuspb.Status{
+		Code:    3, // InvalidArgument
+		Message: "test",
+		Details: []*anypb.Any{any},
+	}
+	return nil, status.ErrorProto(stat)
+}
+
+func TestCustomErr(t *testing.T) {
+	desc := &pb.Test_ServiceDesc
+	srv := &customErrServer{}
+	h, err := NewHandler(desc, srv)
+	if err != nil {
+		t.Fatalf("creating handler: %v", err)
+	}
+
+	info := &errdetailspb.ErrorInfo{
+		Reason: "foo",
+		Domain: "example.com",
+		Metadata: map[string]string{
+			"bar": "spam",
+		},
+	}
+	any, err := anypb.New(info)
+	if err != nil {
+		t.Fatalf("encoding any value: %v", err)
+	}
+	want := &statuspb.Status{
+		Code:    3, // InvalidArgument
+		Message: "test",
+		Details: []*anypb.Any{any},
+	}
+
+	body := &bytes.Buffer{}
+	rr := httptest.NewRecorder()
+	rr.Body = body
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/v1/items/test", nil))
+
+	if rr.Code != 400 {
+		t.Errorf("response returned unexpected code, got=%d, want=%d", rr.Code, 400)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	got := &statuspb.Status{}
+	if err := protojson.Unmarshal(data, got); err != nil {
+		t.Fatalf("parsing response body: %v", err)
+	}
+	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
+		t.Errorf("request returned unexpected diff (-want, +got): %s", diff)
+	}
+}
+
+func TestRequestTooLarge(t *testing.T) {
+	desc := &pb.Test_ServiceDesc
+	srv := &testServer{}
+	opt := MaxRequestBodySize(1)
+	h, err := NewHandler(desc, srv, opt)
+	if err != nil {
+		t.Fatalf("creating handler: %v", err)
+	}
+
+	want := &statuspb.Status{
+		Code:    8, // ResourceExhausted
+		Message: "request body too large",
+	}
+
+	reqBody := strings.NewReader(`{"name":"myname"}`)
+	body := &bytes.Buffer{}
+	rr := httptest.NewRecorder()
+	rr.Body = body
+	h.ServeHTTP(rr, httptest.NewRequest("POST", "/v1/items", reqBody))
+
+	if rr.Code != 429 {
+		t.Errorf("response returned unexpected code, got=%d, want=%d", rr.Code, 429)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	got := &statuspb.Status{}
+	if err := protojson.Unmarshal(data, got); err != nil {
+		t.Fatalf("parsing response body: %v", err)
+	}
+	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
+		t.Errorf("request returned unexpected diff (-want, +got): %s", diff)
 	}
 }
 
