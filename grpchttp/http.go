@@ -598,34 +598,6 @@ func (p *pathComponent) len() int {
 	return n
 }
 
-func (p *pathComponent) string(b *strings.Builder) {
-	if p.wildcard {
-		b.WriteString("*")
-	} else if p.doubleWildcard {
-		b.WriteString("**")
-	} else {
-		b.WriteString(p.ident)
-	}
-
-	if p.next != nil {
-		b.WriteString("/")
-		p.next.string(b)
-		return
-	}
-	if p.verb != "" {
-		b.WriteString(":")
-		b.WriteString(p.verb)
-	}
-	if len(p.variables) != 0 {
-		b.WriteString(" (variables")
-		for _, v := range p.variables {
-			b.WriteString(" ")
-			fmt.Fprintf(b, "%s{%d:%d}", v.name, v.start, v.end)
-		}
-		b.WriteString(")")
-	}
-}
-
 func (p *pathComponent) String() string {
 	return p.s
 }
@@ -874,19 +846,6 @@ func (p *parser) parseFieldPath() error {
 			return nil
 		}
 		p.s.next()
-	}
-}
-
-func (p *parser) parseVerb() (string, error) {
-	p.s.next()
-	p.s.skip()
-	for {
-		switch r := p.s.next(); r {
-		case eof:
-			return p.s.string(), nil
-		case '/', '.', '}', '{', '*', ':', '=':
-			return "", p.s.errorf("reserved character '%c' used in verb", r)
-		}
 	}
 }
 
