@@ -65,6 +65,14 @@ func (t *testServer) ListItems(ctx context.Context, req *emptypb.Empty) (*pb.Lis
 	}, nil
 }
 
+func (t *testServer) TestResponseBody(ctx context.Context, req *emptypb.Empty) (*pb.TestResponseBodyResponse, error) {
+	return &pb.TestResponseBodyResponse{
+		Response: &pb.TestResponseBodyResponse_Response{
+			Name: "foo",
+		},
+	}, nil
+}
+
 func TestListItems(t *testing.T) {
 	desc := &pb.Test_ServiceDesc
 	srv := &testServer{}
@@ -137,14 +145,56 @@ func TestCreateItem(t *testing.T) {
 
 	want := &pb.Item{Name: "myname", Kind: pb.ItemKind_WIDGET, Id: 1}
 
+	testCases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{"POST", "/v1/items", `{"name":"myname","kind":"WIDGET","id":1}`},
+		{"POST", "/test_body_star", `{"item":{"name":"myname","kind":"WIDGET","id":1}}`},
+		{"PATCH", "/test_patch", `{"name":"myname","kind":"WIDGET","id":1}`},
+		{"PUT", "/test_put", `{"name":"myname","kind":"WIDGET","id":1}`},
+		{"CUSTOMMETHOD", "/test_custom", `{"name":"myname","kind":"WIDGET","id":1}`},
+	}
+	for _, tc := range testCases {
+		body := &bytes.Buffer{}
+		rr := httptest.NewRecorder()
+		rr.Body = body
+		h.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
+
+		got := &pb.Item{}
+		data, err := io.ReadAll(body)
+		if err != nil {
+			t.Errorf("reading body for %s %s: %v", tc.method, tc.path, err)
+			continue
+		}
+		if err := protojson.Unmarshal(data, got); err != nil {
+			t.Errorf("parsing response for %s %s %s: %v", tc.method, tc.path, data, err)
+			continue
+		}
+		if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
+			t.Errorf("%s %s returned unexpected diff (-want, +got): %s", tc.method, tc.path, diff)
+		}
+	}
+}
+
+func TestResponseBody(t *testing.T) {
+	desc := &pb.Test_ServiceDesc
+	srv := &testServer{}
+	h, err := NewHandler(desc, srv)
+	if err != nil {
+		t.Fatalf("creating handler: %v", err)
+	}
+
+	want := &pb.TestResponseBodyResponse_Response{Name: "foo"}
+
 	body := &bytes.Buffer{}
 	rr := httptest.NewRecorder()
 	rr.Body = body
-	req := `{"name":"myname","kind":"WIDGET","id":1}`
-	urlPath := "/v1/items"
-	h.ServeHTTP(rr, httptest.NewRequest("POST", urlPath, strings.NewReader(req)))
+	urlPath := "/test_response_body"
+	h.ServeHTTP(rr, httptest.NewRequest("GET", urlPath, nil))
 
-	got := &pb.Item{}
+	got := &pb.TestResponseBodyResponse_Response{}
 	data, err := io.ReadAll(body)
 	if err != nil {
 		t.Fatalf("reading body: %v", err)
@@ -153,7 +203,7 @@ func TestCreateItem(t *testing.T) {
 		t.Fatalf("parsing response %s: %v", data, err)
 	}
 	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
-		t.Fatalf("/v1/shelves returned unexpected diff (-want, +got): %s", diff)
+		t.Fatalf("/test_response_body returned unexpected diff (-want, +got): %s", diff)
 	}
 }
 
