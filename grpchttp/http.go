@@ -13,10 +13,85 @@
 // limitations under the License.
 
 // Package grpchttp implements HTTP/JSON to gRPC transcoding.
+//
+// To use, define a gRPC service with HTTP bindings:
+//
+//  syntax = "proto3";
+//
+//  // ...
+//
+//  import "google/api/annotations.proto";
+//
+//  service Test {
+//    rpc GetItem(GetItemRequest) returns(Item) {
+//      option (google.api.http) = {
+//        get: "/v1/items/{name=*}"
+//      };
+//    }
+//  }
+//
+//  message Item {
+//    string name = 1;
+//    int64 id = 2;
+//  }
+//
+//  message GetItemRequest {
+//    string name = 1;
+//  }
+//
+// After implememeting the service, the grpchttp package can be used to create
+// a [net/http.Handler] that translates HTTP/JSON to gRPC:
+//
+//	srv := &myService{}
+//	hander, err := grpchttp.NewHandler(&pb.Test_ServiceDesc, srv)
+//	if err != nil {
+//		// Handle error...
+//	}
+//	// Listen on port :8080 for HTTP/JSON requests and translate them to be
+//	// served by 'srv'.
+//	log.Fatal(http.ListenAndServe(":8080", handler))
+//
+// See [google.golang.org/genproto/googleapis/api/annotations.HttpRule] for a
+// full list of supported annotation values.
+//
+// # Errors
+//
+// Errors are supported through gRPC's [google.golang.org/grpc/status] and
+// [google.golang.org/grpc/codes] packages. Errors returned to users always use
+// the [google.rpc.Status] message format, usually wrapping errors with an
+// internal code.
+//
+// If a method returns a [google.golang.org/grpc/status] error (for example, by
+// using [status.Errorf]) the error will be passed back to the user directly:
+//
+//	info := &errdetails.ErrorInfo{
+//		Reason: "STOCKOUT",
+//		Domain: "spanner.googleapis.com",
+//		Metadata: map[string]string{
+//			"availableRegions": "us-central1,us-east2",
+//		},
+//	}
+//	any, err := anypb.New(info)
+//	if err != nil {
+//		// Handle error...
+//	}
+//	s := &statuspb.Status{
+//		Code:    int(codes.ResourceExhausted),
+//		Message: "Region out of stock",
+//		Details: []&anypb.Any{any},
+//	}
+//	return nil, status.FromProto(s) // Response body contains Status message.
+//
+// See https://google.aip.dev/193 for guidance, details, and RPC status code
+// mappings to HTTP statuses.
+//
+// [google.rpc.Status]: https://github.com/googleapis/googleapis/blob/master/google/rpc/status.proto
+// [status.Errorf]: https://pkg.go.dev/google.golang.org/grpc/status#Errorf
 package grpchttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,29 +110,37 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
+// Default number of bytes the handler will read from the body. This matches
+// gRPC's default.
+const defaultMaxRequestBodySize = 1024 * 1024 * 4
+
 // Handler implements HTTP/JSON to gRPC transcoding based on google.api.Http
 // annotations.
-//
-//	import "google/api/annotations.proto";
-//
-//	service Messaging {
-//	  rpc GetMessage(GetMessageRequest) returns (Message) {
-//	    option (google.api.http) = {
-//	      get: "/v1/{name=messages/*}"
-//	    };
-//	  }
-//	}
-//	message GetMessageRequest {
-//	  string name = 1; // Mapped to URL path.
-//	}
-//	message Message {
-//	  string text = 1; // The resource content.
-//	}
-//
-// See [google.golang.org/genproto/googleapis/api/annotations.HttpRule] for a
-// full list of supported annotation values.
 type Handler struct {
 	rules map[string][]rule
+
+	maxRequestBodySize int
+}
+
+// HandlerOption configures an option on the returned handler, such as limiting
+// the number of bytes the handler will read.
+type HandlerOption interface {
+	update(*Handler)
+}
+
+type handerOptionFunc func(*Handler)
+
+func (fn handerOptionFunc) update(o *Handler) {
+	fn(o)
+}
+
+// MaxRequestBodySize returns a HandlerOption to set the max message size in
+// bytes the server can receive. If this is not set, the handler uses the
+// default 4MB.
+func MaxRequestBodySize(m int) HandlerOption {
+	return handerOptionFunc(func(o *Handler) {
+		o.maxRequestBodySize = m
+	})
 }
 
 // NewHandler evaluates google.api.Http annotations on a service definition and
@@ -68,7 +151,7 @@ type Handler struct {
 // annotations aren't well defined (get annotations with bodies).
 //
 // All service RPCs must have annotations.
-func NewHandler(desc *grpc.ServiceDesc, srv interface{}) (*Handler, error) {
+func NewHandler(desc *grpc.ServiceDesc, srv interface{}, opts ...HandlerOption) (*Handler, error) {
 	name := protoreflect.FullName(desc.ServiceName)
 	d, err := protoregistry.GlobalFiles.FindDescriptorByName(name)
 	if err != nil {
@@ -106,6 +189,10 @@ func NewHandler(desc *grpc.ServiceDesc, srv interface{}) (*Handler, error) {
 			return nil, fmt.Errorf("evaluating rule for method %s: %v", fullName, err)
 		}
 	}
+
+	for _, o := range opts {
+		o.update(h)
+	}
 	return h, nil
 }
 
@@ -121,7 +208,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		rule.method.handle(w, r, vars, rule.body, rule.response)
+		h.handle(rule.method, w, r, vars, rule.body, rule.response)
 		return
 	}
 	writeResponse(w, 501, unimplementedResp)
@@ -317,12 +404,25 @@ func setValue(msg protoreflect.Message, field, val string) error {
 
 // setBody parses the request body into the provided message. Body can either be
 // the special value "*" or a message field. Subfields aren't supported (name.first).
-func setBody(msg protoreflect.Message, body string, r *http.Request) error {
+func (h *Handler) setBody(msg protoreflect.Message, body string, w http.ResponseWriter, r *http.Request) error {
 	if body == "" {
 		return nil
 	}
-	data, err := io.ReadAll(r.Body)
+
+	maxSize := defaultMaxRequestBodySize
+	if h.maxRequestBodySize > 0 {
+		maxSize = h.maxRequestBodySize
+	}
+
+	reqBody := http.MaxBytesReader(w, r.Body, int64(maxSize))
+	data, err := io.ReadAll(reqBody)
+	reqBody.Close()
+
 	if err != nil {
+		var merr *http.MaxBytesError
+		if errors.As(err, &merr) {
+			return status.Errorf(codes.ResourceExhausted, "request body too large")
+		}
 		return fmt.Errorf("reading request body: %v", err)
 	}
 
@@ -348,7 +448,7 @@ func setBody(msg protoreflect.Message, body string, r *http.Request) error {
 
 // call invokes a gRPC method with the provided request body and parameters. "vars" is filled by the
 // URL path. The boy and response parameters indicate which part of the message should be filled.
-func (m *method) call(r *http.Request, vars []varValue, body, response string) (proto.Message, error) {
+func (h *Handler) call(m *method, w http.ResponseWriter, r *http.Request, vars []varValue, body, response string) (proto.Message, error) {
 	q := r.URL.Query()
 	for _, v := range vars {
 		if _, ok := q[v.name]; ok {
@@ -367,7 +467,7 @@ func (m *method) call(r *http.Request, vars []varValue, body, response string) (
 	}
 
 	msg := m.in.New()
-	if err := setBody(msg, body, r); err != nil {
+	if err := h.setBody(msg, body, w, r); err != nil {
 		return nil, err
 	}
 
@@ -428,9 +528,9 @@ var codeToHTTP = map[codes.Code]int{
 }
 
 // handle implements the core logic for calling the method and writing the response value.
-func (m *method) handle(w http.ResponseWriter, r *http.Request, vars []varValue, body, response string) {
+func (h *Handler) handle(m *method, w http.ResponseWriter, r *http.Request, vars []varValue, body, response string) {
 	statusCode := 200
-	resp, err := m.call(r, vars, body, response)
+	resp, err := h.call(m, w, r, vars, body, response)
 	if err != nil {
 		s, ok := status.FromError(err)
 		if !ok {
