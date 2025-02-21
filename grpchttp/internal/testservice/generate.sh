@@ -30,14 +30,6 @@ if [ ! -f out/protoc/bin/protoc ]; then
     unzip out/protoc.zip -d out/protoc
 fi
 
-export GOBIN="${PWD}/out"
-if [ ! -f out/protoc-gen-go ]; then
-    go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
-fi
-if [ ! -f out/protoc-gen-go-grpc ]; then
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
-fi
-
 if [ ! -d out/include/googleapis ]; then
     mkdir -p out/include
     git clone https://github.com/googleapis/googleapis out/include/googleapis
@@ -46,7 +38,7 @@ if [ ! -d out/include/googleapis ]; then
     cd -
 fi
 
-PATH="${PWD}/out:${PATH}" ./out/protoc/bin/protoc \
+PATH="${PWD}/bin:${PWD}/out:${PATH}" ./out/protoc/bin/protoc \
     --go_out=. \
     --go_opt=paths=source_relative \
     --go_opt=Mtest.proto=../testservice \

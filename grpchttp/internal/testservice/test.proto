@@ -62,7 +62,9 @@ service Test {
   }
 }
 
+// Item is a foo.
 message Item {
+// Bar
   string name = 1;
   int64 id = 2;
   ItemKind kind = 3;
