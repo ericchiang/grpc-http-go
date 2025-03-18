@@ -16,28 +16,28 @@
 //
 // To use, define a gRPC service with HTTP bindings:
 //
-//  syntax = "proto3";
+//	syntax = "proto3";
 //
-//  // ...
+//	// ...
 //
-//  import "google/api/annotations.proto";
+//	import "google/api/annotations.proto";
 //
-//  service Test {
-//    rpc GetItem(GetItemRequest) returns(Item) {
-//      option (google.api.http) = {
-//        get: "/v1/items/{name=*}"
-//      };
-//    }
-//  }
+//	service Test {
+//	  rpc GetItem(GetItemRequest) returns(Item) {
+//	    option (google.api.http) = {
+//	      get: "/v1/items/{name=*}"
+//	    };
+//	  }
+//	}
 //
-//  message Item {
-//    string name = 1;
-//    int64 id = 2;
-//  }
+//	message Item {
+//	  string name = 1;
+//	  int64 id = 2;
+//	}
 //
-//  message GetItemRequest {
-//    string name = 1;
-//  }
+//	message GetItemRequest {
+//	  string name = 1;
+//	}
 //
 // After implememeting the service, the grpchttp package can be used to create
 // a [net/http.Handler] that translates HTTP/JSON to gRPC:
@@ -263,6 +263,16 @@ func (h *Handler) addRule(m *method, httpRule *annotations.HttpRule, additional 
 	if method == "" {
 		return fmt.Errorf("no method provided for rule: %s", httpRule)
 	}
+	if httpRule.GetBody() != "" && httpRule.GetBody() != "*" {
+		fd := m.in.Descriptor().Fields().ByTextName(httpRule.GetBody())
+		if fd == nil {
+			return fmt.Errorf("unrecognized 'body' value for input message %s: %s",
+				m.in.Descriptor().FullName(), httpRule.GetBody())
+		}
+		if fd.Kind() != protoreflect.MessageKind {
+			return fmt.Errorf("'body' value '%s' is not a message", httpRule.GetBody())
+		}
+	}
 
 	pc, err := parsePathTemplate(path)
 	if err != nil {
@@ -434,6 +444,9 @@ func (h *Handler) setBody(msg protoreflect.Message, body string, w http.Response
 	}
 
 	fd := msg.Type().Descriptor().Fields().ByTextName(body)
+	if fd == nil {
+		return fmt.Errorf("unrecognized body: %s", body)
+	}
 	if fd.Kind() != protoreflect.MessageKind {
 		return fmt.Errorf("expected field %s to be a message, got %s", body, fd.Kind())
 	}
@@ -563,12 +576,12 @@ func writeResponse(w http.ResponseWriter, statusCode int, resp proto.Message) {
 // element. The template '/foo/{x=bar/*}:spam' would be represented as the
 // following nodes:
 //
-//   'foo' -> 'bar' -> '*'
+//	'foo' -> 'bar' -> '*'
 //
 // The final node holds variables and verbs of the template. For the example
 // above, the variables would be:
 //
-//   pathVariable{name: "x", start: 1, end: 2}
+//	pathVariable{name: "x", start: 1, end: 2}
 //
 // The verb would be ':spam'.
 type pathTemplate struct {
@@ -833,12 +846,11 @@ func (p *parser) parse(path string) (*pathTemplate, error) {
 
 // parseSegments parse a top level template, including segments and optional verb.
 //
-//   Template = "/" Segments [ Verb ] ;
+//	Template = "/" Segments [ Verb ] ;
 //
 // This is used within variables as well, but rejects recursive variables.
 //
-//   Variable = "{" FieldPath [ "=" Segments ] "}" ;
-//
+//	Variable = "{" FieldPath [ "=" Segments ] "}" ;
 func (p *parser) parseSegments(inVariable bool) (*pathTemplate, error) {
 	var (
 		vars       []pathVariable
