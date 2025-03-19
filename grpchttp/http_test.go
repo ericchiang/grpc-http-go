@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	pb "github.com/ericchiang/grpc-http-go/grpchttp/internal/testservice"
 	errdetailspb "google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -46,9 +47,10 @@ func (t *testServer) CreateItem(ctx context.Context, req *pb.CreateItemRequest) 
 
 func (t *testServer) GetItem(ctx context.Context, req *pb.GetItemRequest) (*pb.Item, error) {
 	resp := &pb.Item{
-		Name: req.GetName(),
-		Id:   req.GetFilter().GetId(),
-		Kind: req.GetFilter().GetKind(),
+		Name:     req.GetName(),
+		Id:       req.GetFilter().GetId(),
+		Kind:     req.GetFilter().GetKind(),
+		ReadMask: req.GetReadMask(),
 	}
 
 	switch req.GetName() {
@@ -118,12 +120,19 @@ func TestGetItem(t *testing.T) {
 		t.Fatalf("creating handler: %v", err)
 	}
 
-	want := &pb.Item{Name: "myname", Kind: pb.ItemKind_WIDGET, Id: 1}
+	want := &pb.Item{
+		Name: "myname",
+		Kind: pb.ItemKind_WIDGET,
+		Id:   1,
+		ReadMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"name", "filter"},
+		},
+	}
 
 	body := &bytes.Buffer{}
 	rr := httptest.NewRecorder()
 	rr.Body = body
-	urlPath := "/v1/items/myname?filter.id=1&filter.kind=WIDGET"
+	urlPath := "/v1/items/myname?filter.id=1&filter.kind=WIDGET&read_mask=name%2Cfilter"
 	h.ServeHTTP(rr, httptest.NewRequest("GET", urlPath, nil))
 
 	got := &pb.Item{}
