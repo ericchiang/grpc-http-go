@@ -108,6 +108,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // Default number of bytes the handler will read from the body. This matches
@@ -368,6 +369,8 @@ type method struct {
 	fn reflect.Value // Always kind Func.
 }
 
+var fieldMaskDesc = (&fieldmaskpb.FieldMask{}).ProtoReflect().Descriptor()
+
 // setValue sets a protobuf message to the provided parameter value (name=foo).
 // If the field references a submessage (name.first=foo), setValue walks the
 // message to set the correct field.
@@ -404,6 +407,16 @@ func setValue(msg protoreflect.Message, field, val string) error {
 				return fmt.Errorf("enum %s does not have a value %s", fd.FullName(), val)
 			}
 			v = protoreflect.ValueOfEnum(vd.Number())
+		case protoreflect.MessageKind:
+			if fd.Message() == fieldMaskDesc {
+				msg := msg.Mutable(fd).Message()
+				if err := protojson.Unmarshal([]byte("\""+val+"\""), msg.Interface()); err != nil {
+					return fmt.Errorf("invalid field mask: %s: %v", val, err)
+				}
+				v = protoreflect.ValueOfMessage(msg)
+			} else {
+				return fmt.Errorf("unsupported proto kind: %s", fd.Kind())
+			}
 		default:
 			return fmt.Errorf("unsupported proto kind: %s", fd.Kind())
 		}
