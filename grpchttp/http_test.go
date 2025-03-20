@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -46,12 +47,12 @@ func (t *testServer) CreateItem(ctx context.Context, req *pb.CreateItemRequest) 
 }
 
 func (t *testServer) GetItem(ctx context.Context, req *pb.GetItemRequest) (*pb.Item, error) {
-	resp := &pb.Item{
-		Name:     req.GetName(),
-		Id:       req.GetFilter().GetId(),
-		Kind:     req.GetFilter().GetKind(),
+	resp := pb.Item_builder{
+		Name:     proto.String(req.GetName()),
+		Id:       proto.Int64(req.GetFilter().GetId()),
+		Kind:     req.GetFilter().GetKind().Enum(),
 		ReadMask: req.GetReadMask(),
-	}
+	}.Build()
 
 	switch req.GetName() {
 	case "myname":
@@ -63,20 +64,26 @@ func (t *testServer) GetItem(ctx context.Context, req *pb.GetItemRequest) (*pb.I
 }
 
 func (t *testServer) ListItems(ctx context.Context, req *emptypb.Empty) (*pb.ListItemsResponse, error) {
-	return &pb.ListItemsResponse{
+	return pb.ListItemsResponse_builder{
 		Items: []*pb.Item{
-			{Name: "myname", Id: 1},
-			{Name: "myname2", Id: 2},
+			pb.Item_builder{
+				Name: proto.String("myname"),
+				Id:   proto.Int64(1),
+			}.Build(),
+			pb.Item_builder{
+				Name: proto.String("myname2"),
+				Id:   proto.Int64(2),
+			}.Build(),
 		},
-	}, nil
+	}.Build(), nil
 }
 
 func (t *testServer) TestResponseBody(ctx context.Context, req *emptypb.Empty) (*pb.TestResponseBodyResponse, error) {
-	return &pb.TestResponseBodyResponse{
-		Response: &pb.TestResponseBodyResponse_Response{
-			Name: "foo",
-		},
-	}, nil
+	return pb.TestResponseBodyResponse_builder{
+		Response: pb.TestResponseBodyResponse_Response_builder{
+			Name: proto.String("foo"),
+		}.Build(),
+	}.Build(), nil
 }
 
 func TestListItems(t *testing.T) {
@@ -87,12 +94,18 @@ func TestListItems(t *testing.T) {
 		t.Fatalf("creating handler: %v", err)
 	}
 
-	want := &pb.ListItemsResponse{
+	want := pb.ListItemsResponse_builder{
 		Items: []*pb.Item{
-			{Name: "myname", Id: 1},
-			{Name: "myname2", Id: 2},
+			pb.Item_builder{
+				Name: proto.String("myname"),
+				Id:   proto.Int64(1),
+			}.Build(),
+			pb.Item_builder{
+				Name: proto.String("myname2"),
+				Id:   proto.Int64(2),
+			}.Build(),
 		},
-	}
+	}.Build()
 
 	body := &bytes.Buffer{}
 	rr := httptest.NewRecorder()
@@ -120,14 +133,14 @@ func TestGetItem(t *testing.T) {
 		t.Fatalf("creating handler: %v", err)
 	}
 
-	want := &pb.Item{
-		Name: "myname",
-		Kind: pb.ItemKind_WIDGET,
-		Id:   1,
+	want := pb.Item_builder{
+		Name: proto.String("myname"),
+		Kind: pb.ItemKind_WIDGET.Enum(),
+		Id:   proto.Int64(1),
 		ReadMask: &fieldmaskpb.FieldMask{
 			Paths: []string{"name", "filter"},
 		},
-	}
+	}.Build()
 
 	body := &bytes.Buffer{}
 	rr := httptest.NewRecorder()
@@ -156,18 +169,23 @@ func TestCreateItem(t *testing.T) {
 		t.Fatalf("creating handler: %v", err)
 	}
 
-	want := &pb.Item{Name: "myname", Kind: pb.ItemKind_WIDGET, Id: 1}
+	want := pb.Item_builder{
+		Name:          proto.String("myname"),
+		Kind:          pb.ItemKind_WIDGET.Enum(),
+		Id:            proto.Int64(1),
+		RequiredField: proto.Int32(1),
+	}.Build()
 
 	testCases := []struct {
 		method string
 		path   string
 		body   string
 	}{
-		{"POST", "/v1/items", `{"name":"myname","kind":"WIDGET","id":1}`},
-		{"POST", "/test_body_star", `{"item":{"name":"myname","kind":"WIDGET","id":1}}`},
-		{"PATCH", "/test_patch", `{"name":"myname","kind":"WIDGET","id":1}`},
-		{"PUT", "/test_put", `{"name":"myname","kind":"WIDGET","id":1}`},
-		{"CUSTOMMETHOD", "/test_custom", `{"name":"myname","kind":"WIDGET","id":1}`},
+		{"POST", "/v1/items", `{"name":"myname","kind":"WIDGET","id":1,"requiredField":1}`},
+		{"POST", "/test_body_star", `{"item":{"name":"myname","kind":"WIDGET","id":1,"requiredField":1}}`},
+		{"PATCH", "/test_patch", `{"name":"myname","kind":"WIDGET","id":1,"requiredField":1}`},
+		{"PUT", "/test_put", `{"name":"myname","kind":"WIDGET","id":1,"requiredField":1}`},
+		{"CUSTOMMETHOD", "/test_custom", `{"name":"myname","kind":"WIDGET","id":1,"requiredField":1}`},
 	}
 	for _, tc := range testCases {
 		body := &bytes.Buffer{}
@@ -199,7 +217,9 @@ func TestResponseBody(t *testing.T) {
 		t.Fatalf("creating handler: %v", err)
 	}
 
-	want := &pb.TestResponseBodyResponse_Response{Name: "foo"}
+	want := pb.TestResponseBodyResponse_Response_builder{
+		Name: proto.String("foo"),
+	}.Build()
 
 	body := &bytes.Buffer{}
 	rr := httptest.NewRecorder()

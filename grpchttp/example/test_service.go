@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"github.com/ericchiang/grpc-http-go/grpchttp"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/ericchiang/grpc-http-go/grpchttp/internal/testservice"
 )
@@ -29,7 +30,10 @@ type testServer struct {
 }
 
 func (s *testServer) GetItem(ctx context.Context, req *pb.GetItemRequest) (*pb.Item, error) {
-	return &pb.Item{Name: req.GetName(), Id: 42}, nil
+	return pb.Item_builder{
+		Name: proto.String(req.GetName()),
+		Id:   proto.Int64(42),
+	}.Build(), nil
 }
 
 func main() {

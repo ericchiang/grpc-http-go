@@ -12,65 +12,67 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-syntax = "proto3";
+edition = "2023";
 
 package ericchiang.protorest.internal.testservice;
 
 import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
+import "google/protobuf/go_features.proto";
+
+option features.(pb.go).api_level = API_OPAQUE;
 
 service Test {
-  rpc GetItem(GetItemRequest) returns(Item) {
-    option (google.api.http) = { get: "/v1/items/{name=*}" };
-  } 
+  rpc GetItem(GetItemRequest) returns (Item) {
+    option (google.api.http) = {
+      get : "/v1/items/{name=*}"
+    };
+  }
 
-  rpc CreateItem(CreateItemRequest) returns(Item) {
-    option (google.api.http) = { 
-      post: "/v1/items"
-      body: "item"
-      additional_bindings: {
-        post: "/test_body_star"
-        body: "*"
-      }
-      additional_bindings: {
-        put: "/test_put"
-        body: "item"
-      }
-      additional_bindings: {
-        patch: "/test_patch"
-        body: "item"
-      }
-      additional_bindings: {
-        custom: {
-          kind: "CUSTOMMETHOD"
-          path: "/test_custom"
-        }
-        body: "item"
+  rpc CreateItem(CreateItemRequest) returns (Item) {
+    option (google.api.http) = {
+      post : "/v1/items"
+      body : "item"
+      additional_bindings : {post : "/test_body_star" body : "*"}
+      additional_bindings : {put : "/test_put" body : "item"}
+      additional_bindings : {patch : "/test_patch" body : "item"}
+      additional_bindings : {
+        custom : {kind : "CUSTOMMETHOD" path : "/test_custom"}
+        body : "item"
       }
     };
   }
 
-  rpc ListItems(google.protobuf.Empty) returns(ListItemsResponse) {
-    option (google.api.http) = { get: "/v1/items" };
-  } 
-
-  rpc TestResponseBody(google.protobuf.Empty) returns(TestResponseBodyResponse) {
+  rpc ListItems(google.protobuf.Empty) returns (ListItemsResponse) {
     option (google.api.http) = {
-      get: "/test_response_body"
-      response_body: "response"
+      get : "/v1/items"
+    };
+  }
+
+  rpc TestResponseBody(google.protobuf.Empty)
+      returns (TestResponseBodyResponse) {
+    option (google.api.http) = {
+      get : "/test_response_body"
+      response_body : "response"
     };
   }
 }
 
 // Item is a foo.
 message Item {
-// Bar
+  // Bar
   string name = 1;
   int64 id = 2;
   ItemKind kind = 3;
 
   google.protobuf.FieldMask read_mask = 4;
+
+  int32 required_field = 5 [ (google.api.field_behavior) = REQUIRED ];
+  int32 output_only_field = 6 [ (google.api.field_behavior) = OUTPUT_ONLY ];
+  int32 input_only_field = 7 [ (google.api.field_behavior) = INPUT_ONLY ];
+  int32 immutable_field = 8 [ (google.api.field_behavior) = IMMUTABLE ];
 }
 
 enum ItemKind {
@@ -91,17 +93,11 @@ message GetItemRequest {
   google.protobuf.FieldMask read_mask = 3;
 }
 
-message CreateItemRequest {
-  Item item = 1;
-}
+message CreateItemRequest { Item item = 1; }
 
-message ListItemsResponse {
-  repeated Item items = 1;
-}
+message ListItemsResponse { repeated Item items = 1; }
 
 message TestResponseBodyResponse {
-  message Response {
-    string name = 1;
-  }
+  message Response { string name = 1; }
   Response response = 1;
 }

@@ -54,6 +54,21 @@
 // See [google.golang.org/genproto/googleapis/api/annotations.HttpRule] for a
 // full list of supported annotation values.
 //
+// # Field behavior
+//
+// Ths package also supports field behavior annotations to mandate required,
+// immutable, output only field, etc. During request and response processing,
+// the package automatically checks the presence of required fields on POST
+// (create) requests, and clears immutable and output only fields as appropriate.
+//
+//	message Title {
+//	  // Must be provided or the server will automatically return an input
+//	  // validation error.
+//	  string text = 1 [(google.api.field_behavior) = REQUIRED];
+//	}
+//
+// See: https://google.aip.dev/203
+//
 // # Errors
 //
 // Errors are supported through gRPC's [google.golang.org/grpc/status] and
@@ -492,20 +507,24 @@ func (h *Handler) call(m *method, w http.ResponseWriter, r *http.Request, vars [
 		vars = append(vars, varValue{k, vv[0]})
 	}
 
-	msg := m.in.New()
-	if err := h.setBody(msg, body, w, r); err != nil {
+	req := m.in.New()
+	if err := h.setBody(req, body, w, r); err != nil {
 		return nil, err
 	}
 
 	for _, v := range vars {
-		if err := setValue(msg, v.name, v.val); err != nil {
+		if err := setValue(req, v.name, v.val); err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "failed to set value %s on request: %v", v.name, err)
 		}
 	}
 
+	if err := applyRequestFieldBehavior(r.Method, req); err != nil {
+		return nil, err
+	}
+
 	in := []reflect.Value{
 		reflect.ValueOf(r.Context()),
-		reflect.ValueOf(msg.Interface()),
+		reflect.ValueOf(req.Interface()),
 	}
 	out := m.fn.Call(in)
 	respVal := out[0]
@@ -516,6 +535,7 @@ func (h *Handler) call(m *method, w http.ResponseWriter, r *http.Request, vars [
 	if respVal.IsNil() {
 		return nil, status.Errorf(codes.Internal, "method returned nil response")
 	}
+
 	resp := respVal.Interface().(proto.Message)
 	if response != "" {
 		msg := resp.ProtoReflect()
@@ -527,6 +547,9 @@ func (h *Handler) call(m *method, w http.ResponseWriter, r *http.Request, vars [
 			return nil, status.Errorf(codes.Internal, "response field is not a message: %s", response)
 		}
 		resp = msg.Get(fd).Message().Interface()
+	}
+	if err := applyResponseFieldBehavior(r.Method, resp.ProtoReflect()); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
