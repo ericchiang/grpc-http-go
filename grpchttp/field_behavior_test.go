@@ -15,8 +15,8 @@ func TestRequestFieldBehavior(t *testing.T) {
 	testCases := []struct {
 		name    string
 		method  string
-		input   *pb.Item
-		want    *pb.Item
+		input   proto.Message
+		want    proto.Message
 		wantErr *missingRequiredErr
 	}{
 		{
@@ -48,10 +48,14 @@ func TestRequestFieldBehavior(t *testing.T) {
 			method: "POST",
 			input: pb.Item_builder{
 				RequiredField:   proto.Int32(1),
-				OutputOnlyField: proto.Int32(1),
+				OutputOnlyField: proto.Int32(2),
+				SubItem: pb.SubItem_builder{
+					OutputOnlyField: proto.Int32(3),
+				}.Build(),
 			}.Build(),
 			want: pb.Item_builder{
 				RequiredField: proto.Int32(1),
+				SubItem:       pb.SubItem_builder{}.Build(),
 			}.Build(),
 		},
 		{
@@ -93,7 +97,7 @@ func TestRequestFieldBehavior(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := proto.Clone(tc.input).(*pb.Item)
+			got := proto.Clone(tc.input)
 			err := applyRequestFieldBehavior(tc.method, got.ProtoReflect())
 			if err != nil {
 				if !reflect.DeepEqual(err, tc.wantErr) {
@@ -116,8 +120,8 @@ func TestResponseFieldBehavior(t *testing.T) {
 	testCases := []struct {
 		name   string
 		method string
-		input  *pb.Item
-		want   *pb.Item
+		input  proto.Message
+		want   proto.Message
 	}{
 		{
 			name:   "Empty message",
@@ -142,7 +146,7 @@ func TestResponseFieldBehavior(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := proto.Clone(tc.input).(*pb.Item)
+			got := proto.Clone(tc.input)
 			err := applyResponseFieldBehavior(tc.method, got.ProtoReflect())
 			if err != nil {
 				t.Errorf("Apply returned unexpected error: %v", err)

@@ -73,6 +73,11 @@ message Item {
   int32 output_only_field = 6 [ (google.api.field_behavior) = OUTPUT_ONLY ];
   int32 input_only_field = 7 [ (google.api.field_behavior) = INPUT_ONLY ];
   int32 immutable_field = 8 [ (google.api.field_behavior) = IMMUTABLE ];
+  SubItem sub_item = 9;
+}
+
+message SubItem {
+  int32 output_only_field = 1 [ (google.api.field_behavior) = OUTPUT_ONLY ];
 }
 
 enum ItemKind {

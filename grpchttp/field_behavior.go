@@ -78,12 +78,12 @@ func applyFieldBehavior(isReq bool, method string, msg protoreflect.Message) *mi
 			switch fb {
 			case annotations.FieldBehavior_INPUT_ONLY:
 				// https://google.aip.dev/203#input-only
-				if isResp {
+				if msg.IsValid() && isResp {
 					msg.Clear(fd)
 				}
 			case annotations.FieldBehavior_IMMUTABLE:
 				// https://google.aip.dev/203#immutable
-				if isReq && method != "POST" {
+				if msg.IsValid() && isReq && method != "POST" {
 					msg.Clear(fd)
 				}
 			case annotations.FieldBehavior_IDENTIFIER:
@@ -91,12 +91,12 @@ func applyFieldBehavior(isReq bool, method string, msg protoreflect.Message) *mi
 				// operation.
 				//
 				// https://google.aip.dev/203#identifier
-				if isReq && method == "POST" {
+				if msg.IsValid() && isReq && method == "POST" {
 					msg.Clear(fd)
 				}
 			case annotations.FieldBehavior_OUTPUT_ONLY:
 				// https://google.aip.dev/203#output-only
-				if isReq {
+				if msg.IsValid() && isReq {
 					msg.Clear(fd)
 				}
 			case annotations.FieldBehavior_REQUIRED:
